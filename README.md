@@ -1,4 +1,4 @@
-# DIC-Synchronous_FLIR_Camera
+# DIC-Cameras
 Some code to manage multiple FLIR cameras based on the example code provided by FLIR
 
 ## Calibration.py
