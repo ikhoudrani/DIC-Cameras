@@ -1,6 +1,7 @@
-num_images: 10
+num_images: 5
 exp_time: 0.01
-file_path: 0
-file_name: image
-stim_run: _numero
+file_path: images
+file_name: temps
+stim_run: _camera
 framerate: 30
+gain: 20

@@ -30,8 +30,9 @@ import threading
 import yaml
 import ruamel.yaml
 from pathlib import Path
+import numpy as np
+import datetime
 
-NUM_IMAGES = 10  # number of images to grab
 
 def read_config(configname):
     """
@@ -60,8 +61,9 @@ os.chdir(dname)
 
 # Read cfg yaml file
 cfg = read_config('params.yaml')
-num_images = cfg['num_images']
+NUM_IMAGES = cfg['num_images']
 exp_time = cfg['exp_time']
+gain = cfg['gain']
 bin_val = int(1)  # bin mode (WIP)
 if cfg['file_path'] == 0:
     im_savepath = os.path.join(dname, 'images')
@@ -75,6 +77,21 @@ if not os.path.exists(im_savepath):
     os.makedirs(im_savepath)
 os.chdir(im_savepath)
 
+# Thread process for saving . This is super important, as the writing process takes time inline,
+# so offloading it to separate CPU threads allows continuation of image capture
+class ThreadWrite(threading.Thread):
+    def __init__(self, data, out):
+        threading.Thread.__init__(self)
+        self.data = data
+        self.out = out
+
+    def run(self):
+        # These commands are legacy, and not needed (kept for documentation)
+        # image_result = self.data
+        # image_converted = image_result.Convert(PySpin.PixelFormat_Mono8, PySpin.HQ_LINEAR)
+        self.data.Save(self.out)
+
+
 
 def acquire_images(cam_list):
     """
@@ -85,6 +102,9 @@ def acquire_images(cam_list):
     :return: True if successful, False otherwise.
     :rtype: bool
     """
+    times_0 = []
+    times_1 = []
+    diff_time = []
 
     print('*** IMAGE ACQUISITION ***\n')
     try:
@@ -137,9 +157,17 @@ def acquire_images(cam_list):
         # single camera before grabbing any images from another.
         for n in range(NUM_IMAGES):
             for i, cam in enumerate(cam_list):
+
                 try:
                     # Retrieve device serial number for filename
                     node_device_serial_number = PySpin.CStringPtr(cam.GetTLDeviceNodeMap().GetNode('DeviceSerialNumber'))
+
+                    # Set value for gain and exposure time
+                    cam.GainAuto.SetValue(PySpin.GainAuto_Off)
+                    cam.Gain.SetValue(gain)
+                    cam.ExposureAuto.SetValue(PySpin.ExposureAuto_Off)
+                    cam.ExposureTime.SetValue(min(cam.ExposureTime.GetMax(), exp_time * 1000000))
+
 
                     if PySpin.IsAvailable(node_device_serial_number) and PySpin.IsReadable(node_device_serial_number):
                         device_serial_number = node_device_serial_number.GetValue()
@@ -147,7 +175,14 @@ def acquire_images(cam_list):
 
                     # Retrieve next received image and ensure image completion
                     image_result = cam.GetNextImage(1000)
+                    if i==0:
+                        times_0.append(str(datetime.datetime.now()))
 
+
+                    if i==1:
+                        times_1.append(str(datetime.datetime.now()))
+
+                    diff_time.append(times_0-times_1)
                     if image_result.IsIncomplete():
                         print('Image incomplete with image status %d ... \n' % image_result.GetImageStatus())
                     else:
@@ -160,14 +195,18 @@ def acquire_images(cam_list):
                         image_converted = image_result.Convert(PySpin.PixelFormat_Mono8, PySpin.HQ_LINEAR)
 
                         # Create a unique filename
-                        if device_serial_number:
-                            filename = 'AcquisitionMultipleCamera-%s-%d.jpg' % (device_serial_number, n)
-                        else:
-                            filename = 'AcquisitionMultipleCamera-%d-%d.jpg' % (i, n)
+                        #fullfilename = filename + '_' + str(n) + '_cam' + str(i+1)+  '.jpg'
+                        fullfilename = '000' + str(n) + '_' + str(i)+  '.jpg'
 
+
+                        background = ThreadWrite(image_result, fullfilename)
+                        background.start()
+
+                        image_result.Release()
                         # Save image
                         image_converted.Save(filename)
                         print('Image saved at %s' % filename)
+
 
                     # Release image
                     image_result.Release()
@@ -191,6 +230,19 @@ def acquire_images(cam_list):
 
             # End acquisition
             cam.EndAcquisition()
+        for i, cam in enumerate(cam_list):
+            if i==0:
+                # Save frametime data
+                with open(filename + '_t' + str(i) + '.txt', 'a') as t:
+                    for item in times_0:
+                        t.write(item + ',\n')
+
+            if i==1:
+                # Save frametime data
+                with open(filename + '_' + str(i) + '.txt', 'a') as t:
+                    for item in times_1:
+                        t.write(item + ',\n')
+
 
     except PySpin.SpinnakerException as ex:
         print('Error: %s' % ex)
