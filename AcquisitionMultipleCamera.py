@@ -70,7 +70,6 @@ if cfg['file_path'] == 0:
 else:
     im_savepath = cfg['file_path']
 filename = cfg['file_name'] + str(cfg['stim_run'])
-framerate = cfg['framerate']
 
 # Create webcam and aux save folder
 if not os.path.exists(im_savepath):
@@ -104,7 +103,8 @@ def acquire_images(cam_list):
     """
     times_0 = []
     times_1 = []
-    diff_time = []
+    diff_time0 = []*NUM_IMAGES
+    diff_time1 = []*NUM_IMAGES
 
     print('*** IMAGE ACQUISITION ***\n')
     try:
@@ -177,12 +177,13 @@ def acquire_images(cam_list):
                     image_result = cam.GetNextImage(1000)
                     if i==0:
                         times_0.append(str(datetime.datetime.now()))
-
+                        diff_time0.append(time.time())
 
                     if i==1:
                         times_1.append(str(datetime.datetime.now()))
+                        diff_time1.append(time.time())
 
-                    diff_time.append(times_0-times_1)
+
                     if image_result.IsIncomplete():
                         print('Image incomplete with image status %d ... \n' % image_result.GetImageStatus())
                     else:
@@ -196,7 +197,7 @@ def acquire_images(cam_list):
 
                         # Create a unique filename
                         #fullfilename = filename + '_' + str(n) + '_cam' + str(i+1)+  '.jpg'
-                        fullfilename = '000' + str(n) + '_' + str(i)+  '.jpg'
+                        fullfilename = '000' + str(n) + '_' + str(i)+  '.tif'
 
 
                         background = ThreadWrite(image_result, fullfilename)
@@ -242,6 +243,13 @@ def acquire_images(cam_list):
                 with open(filename + '_' + str(i) + '.txt', 'a') as t:
                     for item in times_1:
                         t.write(item + ',\n')
+
+        # diff times for performance
+        diff_time = [b - a for a, b in zip(diff_time0, diff_time1)]
+        with open('diff_times' + '.txt', 'a') as t:
+            for item in diff_time:
+                t.write(str(item) + ',\n')
+
 
 
     except PySpin.SpinnakerException as ex:
@@ -358,77 +366,3 @@ def run_multiple_cameras(cam_list):
         result = False
 
     return result
-
-
-def main():
-    """
-    Example entry point; please see Enumeration example for more in-depth
-    comments on preparing and cleaning up the system.
-
-    :return: True if successful, False otherwise.
-    :rtype: bool
-    """
-
-    # Since this application saves images in the current folder
-    # we must ensure that we have permission to write to this folder.
-    # If we do not have permission, fail right away.
-    try:
-        test_file = open('test.txt', 'w+')
-    except IOError:
-        print('Unable to write to current directory. Please check permissions.')
-        input('Press Enter to exit...')
-        return False
-
-    test_file.close()
-    os.remove(test_file.name)
-
-    result = True
-
-    # Retrieve singleton reference to system object
-    system = PySpin.System.GetInstance()
-
-    # Get current library version
-    version = system.GetLibraryVersion()
-    print('Library version: %d.%d.%d.%d' % (version.major, version.minor, version.type, version.build))
-
-    # Retrieve list of cameras from the system
-    cam_list = system.GetCameras()
-
-    num_cameras = cam_list.GetSize()
-
-    print('Number of cameras detected: %d' % num_cameras)
-
-    # Finish if there are no cameras
-    if num_cameras == 0:
-
-        # Clear camera list before releasing system
-        cam_list.Clear()
-
-        # Release system instance
-        system.ReleaseInstance()
-
-        print('Not enough cameras!')
-        input('Done! Press Enter to exit...')
-        return False
-
-    # Run example on all cameras
-    print('Running example for all cameras...')
-
-    result = run_multiple_cameras(cam_list)
-
-    print('Example complete... \n')
-
-    # Clear camera list before releasing system
-    cam_list.Clear()
-
-    # Release system instance
-    system.ReleaseInstance()
-
-    input('Done! Press Enter to exit...')
-    return result
-
-if __name__ == '__main__':
-    if main():
-        sys.exit(0)
-    else:
-        sys.exit(1)
