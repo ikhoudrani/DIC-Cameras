@@ -100,38 +100,31 @@ class ThreadCapture(threading.Thread):
     def run(self):
         times = []
         t1 = []
-        if framerate != 'hardware':
-            nodemap = self.cam.GetNodeMap()
-
         if self.camnum == 0:
             primary = 1
         else:
             primary = 0
 
-        for i in range(num_images):
+        for i in range(NUM_IMAGES):
             fstart = time.time()
             try:
-                #  Retrieve next received image
-                if framerate == 'hardware':
-                    image_result = self.cam.GetNextImage()
-                else:
-                    node_softwaretrigger_cmd = PySpin.CCommandPtr(nodemap.GetNode('TriggerSoftware'))
-                    if not PySpin.IsAvailable(node_softwaretrigger_cmd) or not PySpin.IsWritable(
-                            node_softwaretrigger_cmd):
-                        print('Unable to execute trigger. Aborting...')
-                        return False
-                    node_softwaretrigger_cmd.Execute()
-                    image_result = self.cam.GetNextImage()
+                node_softwaretrigger_cmd = PySpin.CCommandPtr(nodemap.GetNode('TriggerSoftware'))
+                if not PySpin.IsAvailable(node_softwaretrigger_cmd) or not PySpin.IsWritable(
+                        node_softwaretrigger_cmd):
+                    print('Unable to execute trigger. Aborting...')
+                    return False
+                node_softwaretrigger_cmd.Execute()
+                image_result = self.cam.GetNextImage()
 
                 times.append(str(time.time()))
                 if i == 0 and primary == 1:
                     t1 = time.time()
                     print('*** ACQUISITION STARTED ***\n')
 
-                if i == int(num_images - 1) and primary == 1:
+                if i == int(NUM_IMAGES - 1) and primary == 1:
                     t2 = time.time()
                 if primary:
-                    print('COLLECTING IMAGE ' + str(i + 1) + ' of ' + str(num_images), end='\r')
+                    print('COLLECTING IMAGE ' + str(i + 1) + ' of ' + str(NUM_IMAGES), end='\r')
                     sys.stdout.flush()
 
                 # Compose filename, write image to disk
@@ -140,10 +133,6 @@ class ThreadCapture(threading.Thread):
                 background.start()
                 image_result.Release()
                 ftime = time.time() - fstart
-                # Framerate sync
-                if framerate != 'hardware':
-                    if ftime < 1 / framerate:
-                        time.sleep(1 / framerate - ftime)
 
             except PySpin.SpinnakerException as ex:
                 print('Error (577): %s' % ex)
@@ -151,7 +140,7 @@ class ThreadCapture(threading.Thread):
 
         self.cam.EndAcquisition()
         if primary:
-            print('Effective frame rate: ' + str(num_images / (t2 - t1)))
+            print('Effective frame rate: ' + str(NUM_IMAGES / (t2 - t1)))
         # Save frametime data
         with open(filename + '_t' + str(self.camnum) + '.txt', 'a') as t:
             for item in times:
