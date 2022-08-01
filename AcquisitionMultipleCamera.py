@@ -90,6 +90,72 @@ class ThreadWrite(threading.Thread):
         # image_converted = image_result.Convert(PySpin.PixelFormat_Mono8, PySpin.HQ_LINEAR)
         self.data.Save(self.out)
 
+# Capturing is also threaded, to increase performance
+class ThreadCapture(threading.Thread):
+    def __init__(self, cam, camnum, nodemap):
+        threading.Thread.__init__(self)
+        self.cam = cam
+        self.camnum = camnum
+
+    def run(self):
+        times = []
+        t1 = []
+        if framerate != 'hardware':
+            nodemap = self.cam.GetNodeMap()
+
+        if self.camnum == 0:
+            primary = 1
+        else:
+            primary = 0
+
+        for i in range(num_images):
+            fstart = time.time()
+            try:
+                #  Retrieve next received image
+                if framerate == 'hardware':
+                    image_result = self.cam.GetNextImage()
+                else:
+                    node_softwaretrigger_cmd = PySpin.CCommandPtr(nodemap.GetNode('TriggerSoftware'))
+                    if not PySpin.IsAvailable(node_softwaretrigger_cmd) or not PySpin.IsWritable(
+                            node_softwaretrigger_cmd):
+                        print('Unable to execute trigger. Aborting...')
+                        return False
+                    node_softwaretrigger_cmd.Execute()
+                    image_result = self.cam.GetNextImage()
+
+                times.append(str(time.time()))
+                if i == 0 and primary == 1:
+                    t1 = time.time()
+                    print('*** ACQUISITION STARTED ***\n')
+
+                if i == int(num_images - 1) and primary == 1:
+                    t2 = time.time()
+                if primary:
+                    print('COLLECTING IMAGE ' + str(i + 1) + ' of ' + str(num_images), end='\r')
+                    sys.stdout.flush()
+
+                # Compose filename, write image to disk
+                fullfilename = filename + '_' + str(i + 1) + '_cam' + str(primary) + '.jpg'
+                background = ThreadWrite(image_result, fullfilename)
+                background.start()
+                image_result.Release()
+                ftime = time.time() - fstart
+                # Framerate sync
+                if framerate != 'hardware':
+                    if ftime < 1 / framerate:
+                        time.sleep(1 / framerate - ftime)
+
+            except PySpin.SpinnakerException as ex:
+                print('Error (577): %s' % ex)
+                return False
+
+        self.cam.EndAcquisition()
+        if primary:
+            print('Effective frame rate: ' + str(num_images / (t2 - t1)))
+        # Save frametime data
+        with open(filename + '_t' + str(self.camnum) + '.txt', 'a') as t:
+            for item in times:
+                t.write(item + ',\n')
 
 
 def acquire_images(cam_list):

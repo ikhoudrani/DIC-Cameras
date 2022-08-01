@@ -4,3 +4,4 @@ file_path: images
 file_name: times
 stim_run: _camera
 gain: 45
+framerate: 0

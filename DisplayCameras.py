@@ -58,7 +58,7 @@ def AcquireAndDisplay(cam_list, system, cameras):
             print("take picture")
             for key, value in frame.items():
                 for i, cam in enumerate(cameras):
-                    cv2.imwrite("{:04}_{}.jpg".format(count,i), value)
+                    cv2.imwrite("{:04}_{}.jpg".format(count,0), value)
                 count = count + 1
 
 
@@ -86,7 +86,7 @@ def AcquireAndDisplay(cam_list, system, cameras):
                     res = cv2.resize(cvi, (int(1280/4),int(1024/4)))
                     line = cv2.line(res, (int(1280/8), 0), (int(1280/8),int(1024/4)), (0, 0, 255), 2)
                     line = cv2.line(res, (0, int(1024/8)), (int(1280/4),int(1024/8)), (0, 0, 255), 2)
-                    img = cv2.imshow("cam {}".format(device_serial_number), line)
+                    cv2.imshow("cam {}".format(device_serial_number), line)
 
                 i.Release()
                 del i

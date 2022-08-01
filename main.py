@@ -3,6 +3,8 @@ import PySpin
 import sys
 from AcquisitionMultipleCamera import run_multiple_cameras
 from DisplayCameras import AcquireAndDisplay, reset_trigger_mode_software
+
+
 def main():
 
     print("1 : AcquisitionMultipleCamera to take multiple pictures from 1 or 2 cameras")
