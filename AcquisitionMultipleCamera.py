@@ -1,27 +1,3 @@
-# ============================================================================
-# Copyright (c) 2001-2021 FLIR Systems, Inc. All Rights Reserved.
-
-# This software is the confidential and proprietary information of FLIR
-# Integrated Imaging Solutions, Inc. ("Confidential Information"). You
-# shall not disclose such Confidential Information and shall use it only in
-# accordance with the terms of the license agreement you entered into
-# with FLIR Integrated Imaging Solutions, Inc. (FLIR).
-#
-# FLIR MAKES NO REPRESENTATIONS OR WARRANTIES ABOUT THE SUITABILITY OF THE
-# SOFTWARE, EITHER EXPRESSED OR IMPLIED, INCLUDING, BUT NOT LIMITED TO, THE
-# IMPLIED WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR
-# PURPOSE, OR NON-INFRINGEMENT. FLIR SHALL NOT BE LIABLE FOR ANY DAMAGES
-# SUFFERED BY LICENSEE AS A RESULT OF USING, MODIFYING OR DISTRIBUTING
-# THIS SOFTWARE OR ITS DERIVATIVES.
-# ============================================================================
-#
-# AcquisitionMultipleCamera.py shows how to capture images from
-# multiple cameras simultaneously. It relies on information provided in the
-# Enumeration, Acquisition, and NodeMapInfo examples.
-#
-# This example reads similarly to the Acquisition example,
-# except that loops are used to allow for simultaneous acquisitions.
-
 import os
 import PySpin
 import sys
@@ -33,11 +9,7 @@ from pathlib import Path
 import numpy as np
 import datetime
 
-
 def read_config(configname):
-    """
-    Reads structured config file
-    """
     ruamelFile = ruamel.yaml.YAML()
     path = Path(configname)
     if os.path.exists(path):
@@ -48,7 +20,6 @@ def read_config(configname):
             if err.args[2] == "could not determine a constructor for the tag '!!python/tuple'":
                 with open(path, 'r') as ymlfile:
                     cfg = yaml.load(ymlfile, Loader=yaml.SafeLoader)
-                    write_config(configname, cfg)
     else:
         raise FileNotFoundError(
             "Config file is not found. Please make sure that the file exists and/or there are no unnecessary spaces in the path of the config file!")
@@ -61,7 +32,7 @@ os.chdir(dname)
 
 # Read cfg yaml file
 cfg = read_config('params.yaml')
-NUM_IMAGES = cfg['num_images']
+num_images = cfg['num_images']
 exp_time = cfg['exp_time']
 gain = cfg['gain']
 bin_val = int(1)  # bin mode (WIP)
@@ -70,14 +41,15 @@ if cfg['file_path'] == 0:
 else:
     im_savepath = cfg['file_path']
 filename = cfg['file_name'] + str(cfg['stim_run'])
+framerate = cfg['framerate']
 
 # Create webcam and aux save folder
 if not os.path.exists(im_savepath):
     os.makedirs(im_savepath)
 os.chdir(im_savepath)
 
-# Thread process for saving . This is super important, as the writing process takes time inline,
-# so offloading it to separate CPU threads allows continuation of image capture
+# Thread process for saving .
+# offloading it to separate CPU threads allows continuation of image capture
 class ThreadWrite(threading.Thread):
     def __init__(self, data, out):
         threading.Thread.__init__(self)
@@ -85,10 +57,8 @@ class ThreadWrite(threading.Thread):
         self.out = out
 
     def run(self):
-        # These commands are legacy, and not needed (kept for documentation)
-        # image_result = self.data
-        # image_converted = image_result.Convert(PySpin.PixelFormat_Mono8, PySpin.HQ_LINEAR)
         self.data.Save(self.out)
+
 
 # Capturing is also threaded, to increase performance
 class ThreadCapture(threading.Thread):
@@ -99,234 +69,217 @@ class ThreadCapture(threading.Thread):
 
     def run(self):
         times = []
-        t1 = []
+        nodemap = self.cam.GetNodeMap()
+
+        # num of the selected cam
         if self.camnum == 0:
             primary = 1
         else:
             primary = 0
 
-        for i in range(NUM_IMAGES):
-            fstart = time.time()
+        self.cam.BeginAcquisition()
+        for i in range(num_images):
             try:
-                node_softwaretrigger_cmd = PySpin.CCommandPtr(nodemap.GetNode('TriggerSoftware'))
-                if not PySpin.IsAvailable(node_softwaretrigger_cmd) or not PySpin.IsWritable(
-                        node_softwaretrigger_cmd):
-                    print('Unable to execute trigger. Aborting...')
-                    return False
-                node_softwaretrigger_cmd.Execute()
-                image_result = self.cam.GetNextImage()
+                #  Retrieve next received image
+                if framerate == 'hardware':
+                    image_result = self.cam.GetNextImage()
+                else:
+                    node_softwaretrigger_cmd = PySpin.CCommandPtr(nodemap.GetNode('TriggerSoftware'))
+                    if not PySpin.IsAvailable(node_softwaretrigger_cmd) or not PySpin.IsWritable(
+                            node_softwaretrigger_cmd):
+                        print('Unable to execute trigger. Aborting...')
+                        return False
+                    node_softwaretrigger_cmd.Execute()
+                    image_result = self.cam.GetNextImage()
 
-                times.append(str(time.time()))
-                if i == 0 and primary == 1:
-                    t1 = time.time()
-                    print('*** ACQUISITION STARTED ***\n')
+                node_device_serial_number = PySpin.CStringPtr(self.cam.GetTLDeviceNodeMap().GetNode('DeviceSerialNumber'))
 
-                if i == int(NUM_IMAGES - 1) and primary == 1:
-                    t2 = time.time()
+                if PySpin.IsAvailable(node_device_serial_number) and PySpin.IsReadable(node_device_serial_number):
+                    device_serial_number = node_device_serial_number.GetValue()
+                    print('Image %d serial number set to %s...' % (i, device_serial_number))
+
+
+                times.append(str(datetime.datetime.now()))
+
                 if primary:
-                    print('COLLECTING IMAGE ' + str(i + 1) + ' of ' + str(NUM_IMAGES), end='\r')
+                    print('COLLECTING IMAGE ' + str(i + 1) + ' of ' + str(num_images), end='\r')
                     sys.stdout.flush()
 
                 # Compose filename, write image to disk
-                fullfilename = filename + '_' + str(i + 1) + '_cam' + str(primary) + '.jpg'
+                fullfilename = '000' + str(i+1) + '_' + str(primary)+  '.tif'
                 background = ThreadWrite(image_result, fullfilename)
                 background.start()
                 image_result.Release()
-                ftime = time.time() - fstart
+
 
             except PySpin.SpinnakerException as ex:
-                print('Error (577): %s' % ex)
+                print('Error : %s' % ex)
                 return False
 
         self.cam.EndAcquisition()
-        if primary:
-            print('Effective frame rate: ' + str(NUM_IMAGES / (t2 - t1)))
+
         # Save frametime data
         with open(filename + '_t' + str(self.camnum) + '.txt', 'a') as t:
             for item in times:
                 t.write(item + ',\n')
 
+def configure_cam(cam):
+    result = True
 
-def acquire_images(cam_list):
-    """
-    This function acquires and saves 10 images from each device.
-
-    :param cam_list: List of cameras
-    :type cam_list: CameraList
-    :return: True if successful, False otherwise.
-    :rtype: bool
-    """
-    times_0 = []
-    times_1 = []
-    diff_time0 = []*NUM_IMAGES
-    diff_time1 = []*NUM_IMAGES
-
-    print('*** IMAGE ACQUISITION ***\n')
     try:
-        result = True
+        nodemap = cam.GetNodeMap()
+        # Ensure trigger mode off
+        # The trigger must be disabled in order to configure whether the source
+        # is software or hardware.
+        node_trigger_mode = PySpin.CEnumerationPtr(nodemap.GetNode('TriggerMode'))
+        if not PySpin.IsAvailable(node_trigger_mode) or not PySpin.IsReadable(node_trigger_mode):
+            print('Unable to disable trigger mode 129 (node retrieval). Aborting...')
+            return False
 
-        # Prepare each camera to acquire images
-        #
-        # *** NOTES ***
-        # For pseudo-simultaneous streaming, each camera is prepared as if it
-        # were just one, but in a loop. Notice that cameras are selected with
-        # an index. We demonstrate pseduo-simultaneous streaming because true
-        # simultaneous streaming would require multiple process or threads,
-        # which is too complex for an example.
-        #
+        node_trigger_mode_off = node_trigger_mode.GetEntryByName('Off')
+        if not PySpin.IsAvailable(node_trigger_mode_off) or not PySpin.IsReadable(node_trigger_mode_off):
+            print('Unable to disable trigger mode (enum entry retrieval). Aborting...')
+            return False
 
-        for i, cam in enumerate(cam_list):
+        node_trigger_mode.SetIntValue(node_trigger_mode_off.GetValue())
 
-            # Set acquisition mode to continuous
-            node_acquisition_mode = PySpin.CEnumerationPtr(cam.GetNodeMap().GetNode('AcquisitionMode'))
-            if not PySpin.IsAvailable(node_acquisition_mode) or not PySpin.IsWritable(node_acquisition_mode):
-                print('Unable to set acquisition mode to continuous (node retrieval; camera %d). Aborting... \n' % i)
-                return False
+        node_trigger_source = PySpin.CEnumerationPtr(nodemap.GetNode('TriggerSource'))
+        if not PySpin.IsAvailable(node_trigger_source) or not PySpin.IsWritable(node_trigger_source):
+            print('Unable to get trigger source 163 (node retrieval). Aborting...')
+            return False
 
-            node_acquisition_mode_continuous = node_acquisition_mode.GetEntryByName('Continuous')
-            if not PySpin.IsAvailable(node_acquisition_mode_continuous) or not PySpin.IsReadable(
-                    node_acquisition_mode_continuous):
-                print('Unable to set acquisition mode to continuous (entry \'continuous\' retrieval %d). \
-                Aborting... \n' % i)
-                return False
+        # Set primary camera trigger source to line0 (hardware trigger)
+        if framerate == 'hardware':
+            node_trigger_source_set = node_trigger_source.GetEntryByName('Line0')
 
-            acquisition_mode_continuous = node_acquisition_mode_continuous.GetValue()
-
-            node_acquisition_mode.SetIntValue(acquisition_mode_continuous)
-
-            print('Camera %d acquisition mode set to continuous...' % i)
-
-            # Begin acquiring images
-            cam.BeginAcquisition()
-
-            print('Camera %d started acquiring images...' % i)
-
-            print()
-
-        # Retrieve, convert, and save images for each camera
-        #
-        # *** NOTES ***
-        # In order to work with simultaneous camera streams, nested loops are
-        # needed. It is important that the inner loop be the one iterating
-        # through the cameras; otherwise, all images will be grabbed from a
-        # single camera before grabbing any images from another.
-        for n in range(NUM_IMAGES):
-            for i, cam in enumerate(cam_list):
-
-                try:
-                    # Retrieve device serial number for filename
-                    node_device_serial_number = PySpin.CStringPtr(cam.GetTLDeviceNodeMap().GetNode('DeviceSerialNumber'))
-
-                    # Set value for gain and exposure time
-                    cam.GainAuto.SetValue(PySpin.GainAuto_Off)
-                    cam.Gain.SetValue(gain)
-                    cam.ExposureAuto.SetValue(PySpin.ExposureAuto_Off)
-                    cam.ExposureTime.SetValue(min(cam.ExposureTime.GetMax(), exp_time * 1000000))
+        else:
+            node_trigger_source_set = node_trigger_source.GetEntryByName('Software')
 
 
-                    if PySpin.IsAvailable(node_device_serial_number) and PySpin.IsReadable(node_device_serial_number):
-                        device_serial_number = node_device_serial_number.GetValue()
-                        print('Camera %d serial number set to %s...' % (i, device_serial_number))
+        if not PySpin.IsAvailable(node_trigger_source_set) or not PySpin.IsReadable(
+                node_trigger_source_set):
+            print('Unable to set trigger source (enum entry retrieval). Aborting...')
+            return False
 
-                    # Retrieve next received image and ensure image completion
-                    image_result = cam.GetNextImage(1000)
-                    if i==0:
-                        times_0.append(str(datetime.datetime.now()))
-                        diff_time0.append(time.time())
+        node_trigger_source.SetIntValue(node_trigger_source_set.GetValue())
+        node_trigger_mode_on = node_trigger_mode.GetEntryByName('On')
 
-                    if i==1:
-                        times_1.append(str(datetime.datetime.now()))
-                        diff_time1.append(time.time())
+        if not PySpin.IsAvailable(node_trigger_mode_on) or not PySpin.IsReadable(node_trigger_mode_on):
+            print('Unable to enable trigger mode (enum entry retrieval). Aborting...')
+            return False
 
+        node_trigger_mode.SetIntValue(node_trigger_mode_on.GetValue())
 
-                    if image_result.IsIncomplete():
-                        print('Image incomplete with image status %d ... \n' % image_result.GetImageStatus())
-                    else:
-                        # Print image information
-                        width = image_result.GetWidth()
-                        height = image_result.GetHeight()
-                        print('Camera %d grabbed image %d, width = %d, height = %d' % (i, n, width, height))
+        # Set acquisition mode to continuous
+        node_acquisition_mode = PySpin.CEnumerationPtr(nodemap.GetNode('AcquisitionMode'))
+        if not PySpin.IsAvailable(node_acquisition_mode) or not PySpin.IsWritable(node_acquisition_mode):
+            print('Unable to set acquisition mode to continuous (enum retrieval). Aborting...')
+            return False
 
-                        # Convert image to mono 8
-                        image_converted = image_result.Convert(PySpin.PixelFormat_Mono8, PySpin.HQ_LINEAR)
+        # Retrieve entry node from enumeration node
+        node_acquisition_mode_continuous = node_acquisition_mode.GetEntryByName('Continuous')
+        if not PySpin.IsAvailable(node_acquisition_mode_continuous) or not PySpin.IsReadable(
+                node_acquisition_mode_continuous):
+            print('Unable to set acquisition mode to continuous (entry retrieval). Aborting...')
+            return False
 
-                        # Create a unique filename
-                        #fullfilename = filename + '_' + str(n) + '_cam' + str(i+1)+  '.jpg'
-                        fullfilename = '000' + str(n) + '_' + str(i)+  '.tif'
+        # Retrieve integer value from entry node
+        acquisition_mode_continuous = node_acquisition_mode_continuous.GetValue()
 
+        # Set integer value from entry node as new value of enumeration node
+        node_acquisition_mode.SetIntValue(acquisition_mode_continuous)
+        print('Camera acquisition mode set to continuous...' )
 
-                        background = ThreadWrite(image_result, fullfilename)
-                        background.start()
+        # Retrieve Stream Parameters device nodemap
+        s_node_map = cam.GetTLStreamNodeMap()
 
-                        image_result.Release()
-                        # Save image
-                        image_converted.Save(filename)
-                        print('Image saved at %s' % filename)
+        # Retrieve Buffer Handling Mode Information
+        handling_mode = PySpin.CEnumerationPtr(s_node_map.GetNode('StreamBufferHandlingMode'))
+        if not PySpin.IsAvailable(handling_mode) or not PySpin.IsWritable(handling_mode):
+            print('Unable to set Buffer Handling mode (node retrieval). Aborting...\n')
+            return False
 
+        handling_mode_entry = PySpin.CEnumEntryPtr(handling_mode.GetCurrentEntry())
+        if not PySpin.IsAvailable(handling_mode_entry) or not PySpin.IsReadable(handling_mode_entry):
+            print('Unable to set Buffer Handling mode (Entry retrieval). Aborting...\n')
+            return False
 
-                    # Release image
-                    image_result.Release()
-                    print()
+        # Set stream buffer Count Mode to manual
+        stream_buffer_count_mode = PySpin.CEnumerationPtr(s_node_map.GetNode('StreamBufferCountMode'))
+        if not PySpin.IsAvailable(stream_buffer_count_mode) or not PySpin.IsWritable(stream_buffer_count_mode):
+            print('Unable to set Buffer Count Mode (node retrieval). Aborting...\n')
+            return False
 
-                except PySpin.SpinnakerException as ex:
-                    print('Error: %s' % ex)
-                    result = False
+        stream_buffer_count_mode_manual = PySpin.CEnumEntryPtr(stream_buffer_count_mode.GetEntryByName('Manual'))
+        if not PySpin.IsAvailable(stream_buffer_count_mode_manual) or not PySpin.IsReadable(
+                stream_buffer_count_mode_manual):
+            print('Unable to set Buffer Count Mode entry (Entry retrieval). Aborting...\n')
+            return False
 
-        # End acquisition for each camera
-        #
-        # *** NOTES ***
-        # Notice that what is usually a one-step process is now two steps
-        # because of the additional step of selecting the camera. It is worth
-        # repeating that camera selection needs to be done once per loop.
-        #
-        # It is possible to interact with cameras through the camera list with
-        # GetByIndex(); this is an alternative to retrieving cameras as
-        # CameraPtr objects that can be quick and easy for small tasks.
-        for cam in cam_list:
-
-            # End acquisition
-            cam.EndAcquisition()
-        for i, cam in enumerate(cam_list):
-            if i==0:
-                # Save frametime data
-                with open(filename + '_t' + str(i) + '.txt', 'a') as t:
-                    for item in times_0:
-                        t.write(item + ',\n')
-
-            if i==1:
-                # Save frametime data
-                with open(filename + '_' + str(i) + '.txt', 'a') as t:
-                    for item in times_1:
-                        t.write(item + ',\n')
-
-        # diff times for performance
-        diff_time = [b - a for a, b in zip(diff_time0, diff_time1)]
-        with open('diff_times' + '.txt', 'a') as t:
-            for item in diff_time:
-                t.write(str(item) + ',\n')
+        stream_buffer_count_mode.SetIntValue(stream_buffer_count_mode_manual.GetValue())
 
 
+        # Access trigger overlap info
+        node_trigger_overlap = PySpin.CEnumerationPtr(nodemap.GetNode('TriggerOverlap'))
+        if not PySpin.IsAvailable(node_trigger_overlap) or not PySpin.IsWritable(node_trigger_overlap):
+            print('Unable to set trigger overlap to "Read Out". Aborting...')
+            return False
 
+        # Retrieve enumeration for trigger overlap Read Out
+        if framerate == 'hardware':
+            node_trigger_overlap_ro = node_trigger_overlap.GetEntryByName('ReadOut')
+        else:
+            node_trigger_overlap_ro = node_trigger_overlap.GetEntryByName('Off')
+
+        if not PySpin.IsAvailable(node_trigger_overlap_ro) or not PySpin.IsReadable(
+                node_trigger_overlap_ro):
+            print('Unable to set trigger overlap (entry retrieval). Aborting...')
+            return False
+
+        # Retrieve integer value from enumeration
+        trigger_overlap_ro = node_trigger_overlap_ro.GetValue()
+
+        # Set trigger overlap using retrieved integer from enumeration
+        node_trigger_overlap.SetIntValue(trigger_overlap_ro)
+
+        # Access exposure auto info
+        node_exposure_auto = PySpin.CEnumerationPtr(nodemap.GetNode('ExposureAuto'))
+        if not PySpin.IsAvailable(node_exposure_auto) or not PySpin.IsWritable(node_exposure_auto):
+            print('Unable to get exposure auto. Aborting...')
+            return False
+
+        # Retrieve enumeration for trigger overlap Read Out
+        node_exposure_auto_off = node_exposure_auto.GetEntryByName('Off')
+        if not PySpin.IsAvailable(node_exposure_auto_off) or not PySpin.IsReadable(
+                node_exposure_auto_off):
+            print('Unable to get exposure auto "Off" (entry retrieval). Aborting...')
+            return False
+
+        # Set exposure auto to off
+        node_exposure_auto.SetIntValue(node_exposure_auto_off.GetValue())
+        #cam.ExposureAuto.SetValue(PySpin.ExposureAuto_Off)
+
+        # Access exposure info
+        node_exposure_time = PySpin.CFloatPtr(nodemap.GetNode('ExposureTime'))
+        if not PySpin.IsAvailable(node_exposure_time) or not PySpin.IsWritable(node_exposure_time):
+            print('Unable to get exposure time. Aborting...')
+            return False
+
+        # Set value
+        node_exposure_time.SetValue(exp_time * 1000000)
+        cam.GainAuto.SetValue(PySpin.GainAuto_Off)
+        cam.Gain.SetValue(gain)
+
+    # General exception
     except PySpin.SpinnakerException as ex:
-        print('Error: %s' % ex)
-        result = False
+        print('Error (237): %s' % ex)
+        return False
 
     return result
 
 
 def print_device_info(nodemap, cam_num):
-    """
-    This function prints the device information of the camera from the transport
-    layer; please see NodeMapInfo example for more in-depth comments on printing
-    device information from the nodemap.
-
-    :param nodemap: Transport layer device nodemap.
-    :param cam_num: Camera number.
-    :type nodemap: INodeMap
-    :type cam_num: int
-    :returns: True if successful, False otherwise.
-    :rtype: bool
-    """
+    # This function prints the device information of the camera
 
     print('Printing device information for camera %d... \n' % cam_num)
 
@@ -352,72 +305,115 @@ def print_device_info(nodemap, cam_num):
     return result
 
 def run_multiple_cameras(cam_list):
-    """
-    This function acts as the body of the example; please see NodeMapInfo example
-    for more in-depth comments on setting up cameras.
+    thread = []
+    #result = True
 
-    :param cam_list: List of cameras
-    :type cam_list: CameraList
-    :return: True if successful, False otherwise.
-    :rtype: bool
-    """
+    #print('*** DEVICE INFORMATION ***\n')
+
+    for i, cam in enumerate(cam_list):
+        cam.Init()
+        nodemap = cam.GetNodeMap()
+        # Retrieve TL device nodemap
+        nodemap_tldevice = cam.GetTLDeviceNodeMap()
+
+        # Print device information
+        #result &= print_device_info(nodemap_tldevice, i)
+
+        #cam.BeginAcquisition()
+        print('Camera %d started acquiring images...' % i)
+
+        thread.append(ThreadCapture(cam, i, nodemap))
+        thread[i].start()
+
+    for t in thread:
+        t.join()
+
+    for i, cam in enumerate(cam_list):
+        #reset_trigger(cam)
+        cam.DeInit()
+
+
+# Trigger reset
+def reset_trigger(cam):
+    nodemap = cam.GetNodeMap()
     try:
         result = True
+        node_trigger_mode = PySpin.CEnumerationPtr(nodemap.GetNode('TriggerMode'))
+        if not PySpin.IsAvailable(node_trigger_mode) or not PySpin.IsReadable(node_trigger_mode):
+            print('Unable to disable trigger mode 630 (node retrieval). Aborting...')
+            return False
 
-        # Retrieve transport layer nodemaps and print device information for
-        # each camera
-        # *** NOTES ***
-        # This example retrieves information from the transport layer nodemap
-        # twice: once to print device information and once to grab the device
-        # serial number. Rather than caching the nodem#ap, each nodemap is
-        # retrieved both times as needed.
-        print('*** DEVICE INFORMATION ***\n')
+        node_trigger_mode_off = node_trigger_mode.GetEntryByName('Off')
+        if not PySpin.IsAvailable(node_trigger_mode_off) or not PySpin.IsReadable(node_trigger_mode_off):
+            print('Unable to disable trigger mode (enum entry retrieval). Aborting...')
+            return False
 
-        for i, cam in enumerate(cam_list):
-
-            # Retrieve TL device nodemap
-            nodemap_tldevice = cam.GetTLDeviceNodeMap()
-
-            # Print device information
-            result &= print_device_info(nodemap_tldevice, i)
-
-        # Initialize each camera
-        #
-        # *** NOTES ***
-        # You may notice that the steps in this function have more loops with
-        # less steps per loop; this contrasts the AcquireImages() function
-        # which has less loops but more steps per loop. This is done for
-        # demonstrative purposes as both work equally well.
-        #
-        # *** LATER ***
-        # Each camera needs to be deinitialized once all images have been
-        # acquired.
-        for i, cam in enumerate(cam_list):
-
-            # Initialize camera
-            cam.Init()
-
-        # Acquire images on all cameras
-        result &= acquire_images(cam_list)
-
-        # Deinitialize each camera
-        #
-        # *** NOTES ***
-        # Again, each camera must be deinitialized separately by first
-        # selecting the camera and then deinitializing it.
-        for cam in cam_list:
-
-            # Deinitialize camera
-            cam.DeInit()
-
-        # Release reference to camera
-        # NOTE: Unlike the C++ examples, we cannot rely on pointer objects being automatically
-        # cleaned up when going out of scope.
-        # The usage of del is preferred to assigning the variable to None.
-        del cam
+        node_trigger_mode.SetIntValue(node_trigger_mode_off.GetValue())
 
     except PySpin.SpinnakerException as ex:
-        print('Error: %s' % ex)
+        print('Error : %s' % ex)
         result = False
 
     return result
+
+def main():
+    # launch the AcquisitionMultipleCamera code
+
+    try:
+        test_file = open('test.txt', 'w+')
+    except IOError:
+        print('Unable to write to current directory. Please check permissions.')
+        input('Press Enter to exit...')
+        return False
+
+    test_file.close()
+    os.remove(test_file.name)
+
+    result = True
+
+    # Retrieve singleton reference to system object
+    system = PySpin.System.GetInstance()
+
+    # Get current library version
+    version = system.GetLibraryVersion()
+    print('Library version: %d.%d.%d.%d' % (version.major, version.minor, version.type, version.build))
+
+    # Retrieve list of cameras from the system
+    cam_list = system.GetCameras()
+
+    num_cameras = cam_list.GetSize()
+
+    print('Number of cameras detected: %d' % num_cameras)
+
+    # Finish if there are no cameras
+    if num_cameras == 0:
+
+        # Clear camera list before releasing system
+        cam_list.Clear()
+
+        # Release system instance
+        system.ReleaseInstance()
+
+        print('Not enough cameras!')
+        input('Done! Press Enter to exit...')
+        return False
+
+    # Run example on all cameras
+    print('Running example for all cameras...')
+
+    run_multiple_cameras(cam_list)
+
+    # Clear camera list before releasing system
+    cam_list.Clear()
+
+    # Release system instance
+    system.ReleaseInstance()
+
+    print('DONE')
+    time.sleep(.5)
+    print('Goodbye')
+    time.sleep(2)
+    return result
+
+if __name__ == '__main__':
+    main()
