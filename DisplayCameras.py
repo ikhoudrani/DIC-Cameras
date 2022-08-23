@@ -1,9 +1,35 @@
 import sys
-import time
+import os
 import PySpin
-
 import numpy as np
 import cv2
+import yaml
+from pathlib import Path
+import ruamel.yaml
+from ThreadFile import ThreadCapture_DisplayCameras, read_config
+
+# Change cwd to script folder
+abspath = os.path.abspath(__file__)
+dname = os.path.dirname(abspath)
+os.chdir(dname)
+
+# Read cfg yaml file
+cfg = read_config('params.yaml')
+num_images = cfg['num_images']
+exp_time = cfg['exp_time']
+gain = cfg['gain']
+bin_val = int(1)  # bin mode (WIP)
+if cfg['file_path'] == 0:
+    im_savepath = os.path.join(dname, 'images')
+else:
+    im_savepath = os.path.join(dname, 'images')
+filename = cfg['file_name'] + str(cfg['stim_run'])
+framerate = cfg['framerate']
+
+# Create webcam and aux save folder
+if not os.path.exists(im_savepath):
+    os.makedirs(im_savepath)
+os.chdir(im_savepath)
 
 
 
@@ -19,9 +45,7 @@ def reset_trigger_mode_software(cam):
     print("reset trigger mode")
 
 
-#
-#   setup
-#
+
 def AcquireAndDisplay(cam_list, system, cameras):
 
 
@@ -56,10 +80,23 @@ def AcquireAndDisplay(cam_list, system, cameras):
             break
         elif key == 32: # SPACE
             print("take picture")
-            for key, value in frame.items():
+            thread = []
+
+            for i, cam in enumerate(cam_list):
+
+                #cam.BeginAcquisition()
+                print('Camera %d started acquiring images...' % i)
+
+                thread.append(ThreadCapture_DisplayCameras(cam, i, count))
+                thread[i].start()
+
+            for t in thread:
+                t.join()
+            count += num_images
+            '''for key, value in frame.items():
                 for i, cam in enumerate(cameras):
                     cv2.imwrite("{:04}_{}.jpg".format(count,0), value)
-                count = count + 1
+                count = count + 1'''
 
 
         for j, cam in enumerate(cameras):
@@ -94,7 +131,7 @@ def AcquireAndDisplay(cam_list, system, cameras):
             except PySpin.SpinnakerException as ex:
                 print("Error: {}".format(ex))
 
-def main():
+def launch_display():
     system = PySpin.System.GetInstance()
 
     # Get current library version
@@ -123,10 +160,3 @@ def main():
 
     input('Done! Press Enter to exit...')
     return result
-
-
-if __name__ == '__main__':
-    if main():
-        sys.exit(0)
-    else:
-        sys.exit(1)

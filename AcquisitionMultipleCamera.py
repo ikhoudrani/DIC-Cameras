@@ -312,6 +312,7 @@ def run_multiple_cameras(cam_list):
 
     for i, cam in enumerate(cam_list):
         cam.Init()
+        configure_cam(cam)
         nodemap = cam.GetNodeMap()
         # Retrieve TL device nodemap
         nodemap_tldevice = cam.GetTLDeviceNodeMap()
@@ -356,7 +357,7 @@ def reset_trigger(cam):
 
     return result
 
-def main():
+def launch_acquisition():
     # launch the AcquisitionMultipleCamera code
 
     try:
@@ -414,6 +415,3 @@ def main():
     print('Goodbye')
     time.sleep(2)
     return result
-
-if __name__ == '__main__':
-    main()
