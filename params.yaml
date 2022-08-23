@@ -5,3 +5,4 @@ file_name: image
 stim_run: _
 gain: 45
 framerate: 30
+input_v: 5
