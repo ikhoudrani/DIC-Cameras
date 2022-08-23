@@ -6,3 +6,8 @@ PySpin
 keyboard
 subprocess
 yaml
+pathlib
+threading
+ruamel.yaml
+datetime
+cv2
